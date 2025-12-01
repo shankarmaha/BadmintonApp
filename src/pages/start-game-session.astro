@@ -1,0 +1,65 @@
+---
+let error = '';
+let success = '';
+let courts = '';
+
+// Simple GUID generator
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+if (Astro.request.method === 'POST') {
+  const fs = await import('fs/promises');
+  let sessionExists = false;
+  try {
+    const data = await fs.readFile('src/data/badmintonSession.json', 'utf-8');
+    if (data && data.trim() !== '' && data.trim() !== '{}') {
+      sessionExists = true;
+    }
+  } catch (e) {
+    // File does not exist, so session does not exist
+  }
+  if (sessionExists) {
+    // Redirect to home with error message as query param
+    return Astro.redirect('/?error=Game%20is%20in%20play.%20Use%20End%20Game%20Session%20to%20cancel%20the%20Games');
+  }
+  const formData = await Astro.request.formData();
+  const courtsValue = formData.get('courts');
+  courts = typeof courtsValue === 'string' ? courtsValue : '';
+  const numCourts = Number(courts);
+  if (!numCourts || numCourts < 1 || numCourts > 4) {
+    error = 'Number of courts must be between 1 and 4.';
+  } else {
+    const session = {
+      courts: Array.from({ length: numCourts }, (_, i) => ({ courtNumber: i + 1, sessionId: uuidv4() }))
+    };
+    await fs.writeFile('src/data/badmintonSession.json', JSON.stringify(session, null, 2));
+    success = `Session started with ${numCourts} court(s).`;
+    courts = '';
+    return Astro.redirect('/');
+  }
+}
+---
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Start Game Session</title>
+  </head>
+  <body class="bg-teal-300 min-h-screen font-sans">
+    <main class="max-w-md mx-auto mt-10 bg-white rounded shadow p-6">
+      <h2 class="text-xl font-bold mb-4">Start Game Session</h2>
+      <form method="POST">
+        <label class="block mb-2 font-semibold">No of Courts</label>
+        <input name="courts" type="number" min="1" max="4" required class="border rounded px-3 py-2 w-full mb-4" value={courts} />
+        {error && <div class="text-red-500 mb-2">{error}</div>}
+        {success && <div class="text-green-600 mb-2">{success}</div>}
+        <button type="submit" class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition">Start Session</button>
+      </form>
+    </main>
+  </body>
+</html>
+

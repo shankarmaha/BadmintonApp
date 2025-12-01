@@ -1,0 +1,21 @@
+---
+import AddPlayerForm from "../components/AddPlayerForm";
+export const prerender = false;
+---
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Add Player</title>
+  </head>
+  <body class="bg-gray-100 min-h-screen font-sans">
+    <nav class="bg-white shadow p-4 flex justify-between items-center">
+      <a href="/" class="text-orange-500 font-bold">Home</a>
+    </nav>
+    <main class="max-w-md mx-auto mt-10 bg-white rounded shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Add a Player</h2>
+      <AddPlayerForm client:load />
+    </main>
+  </body>
+</html>
+

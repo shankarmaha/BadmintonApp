@@ -1,0 +1,133 @@
+---
+
+import PlayerList from '../components/PlayerList';
+import BadmintonSession from '../components/BadmintonSession';
+import fs from 'fs/promises';
+import { getPlayers, getPlayersQueue } from '../data/playerStore.js';
+
+
+// Fetch all data
+const [playersQueue, allPlayers, playerGames] = await Promise.all([
+  getPlayersQueue(),
+  getPlayers(),
+  fs.readFile('src/data/playerGames.json', 'utf-8').then(JSON.parse).catch(() => [])
+]);
+
+// Build the list to display: for each guid in playersQueue, get name, arrivedDateTime from players, and noOfGamesPlayed from playerGames
+const players = playersQueue.map(q => {
+  const player = allPlayers.find(p => p.guid === q.guid) || {};
+  const games = playerGames.find(g => g.guid === q.guid) || { noOfGamesPlayed: 0 };
+  return {
+    guid: q.guid,
+    name: player.name || '',
+    arrivedDateTime: player.arrivedDateTime ? player.arrivedDateTime.split(':').slice(0,2).join(':') : '',
+    noOfGamesPlayed: games.noOfGamesPlayed
+  };
+});
+
+---
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home | Player List</title>
+  </head>
+  <body class="bg-teal-300 min-h-screen font-sans">
+    <nav class="bg-white shadow p-4 flex justify-between items-center">
+      <h1 class="text-2xl font-bold text-orange-500">CPS Game Picker</h1>
+      <div class="flex items-center gap-4">
+        <a href="/add-player" class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition">Add Player</a>
+        <a href="/player-stats" class="ml-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition">Player Stats</a>
+        <a href="/game-stats" class="ml-4 px-4 py-2 bg-pink-600 text-white rounded hover:bg-pink-700 transition">Game Stats</a>
+        <button id="pick-game-btn" class="px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600 transition">Pick Game</button>
+        <div class="relative group">
+          <button class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition focus:outline-none">Game Setup</button>
+          <div class="absolute right-0 mt-2 w-48 bg-white rounded shadow-lg opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity z-10">
+            <a href="/start-game-session" class="block px-4 py-2 text-gray-700 hover:bg-teal-100">Start Game Session</a>
+            <a href="#" id="end-session-link" class="block px-4 py-2 text-gray-700 hover:bg-teal-100">End Game Session</a>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <main class="max-w-7xl mx-auto mt-10 flex flex-col md:flex-row gap-8">
+      <section class="md:w-1/3 w-full bg-white rounded shadow p-6 mb-8 md:mb-0">
+        <PlayerList client:load players={players}/>
+      </section>
+      <section class="md:w-2/3 w-full bg-white rounded shadow p-6">
+        <BadmintonSession client:load />
+      </section>
+    </main>
+    <script>
+      // Show a styled modal popup if error query param is present
+      window.addEventListener('DOMContentLoaded', () => {
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get('error');
+        if (error) {
+          const modal = document.createElement('div');
+          modal.id = 'error-modal';
+          modal.innerHTML = `
+            <div class="fixed inset-0 flex items-center justify-center z-50">
+              <div class="absolute inset-0 bg-black opacity-40"></div>
+              <div class="relative bg-white rounded-lg shadow-lg p-6 max-w-sm w-full text-center">
+                <div class="text-red-600 text-lg font-semibold mb-2">Error</div>
+                <div class="mb-4">${decodeURIComponent(error)}</div>
+                <button id="close-error-modal" class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition">Close</button>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(modal);
+          document.getElementById('close-error-modal').onclick = () => {
+            modal.remove();
+            // Remove error param from URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete('error');
+            window.history.replaceState({}, document.title, url.pathname + url.search);
+          };
+        }
+        // Pick Game button logic
+        const pickGameBtn = document.getElementById('pick-game-btn');
+        if (pickGameBtn) {
+          pickGameBtn.onclick = async () => {
+            try {
+              const res = await fetch('/api/pick-game', { method: 'POST' });
+              location.reload(); // Reload the page to refresh BadmintonSession
+            } catch (err) {
+              alert('Error picking game');
+            }
+          };
+        }
+        // End Game Session link logic
+        const endSessionLink = document.getElementById('end-session-link');
+        if (endSessionLink) {
+          endSessionLink.onclick = (e) => {
+            e.preventDefault();
+            const modal = document.createElement('div');
+            modal.id = 'end-session-modal';
+            modal.innerHTML = `
+              <div class="fixed inset-0 flex items-center justify-center z-50">
+                <div class="absolute inset-0 bg-black opacity-40"></div>
+                <div class="relative bg-white rounded-lg shadow-lg p-6 max-w-sm w-full text-center border-2 border-red-600">
+                  <div class="text-red-600 text-3xl mb-2">&#9888;</div>
+                  <div class="text-lg font-semibold mb-4">Game session in progress. Do you want to end the session?</div>
+                  <div class="flex justify-center gap-4">
+                    <button id="confirm-end-session" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Yes</button>
+                    <button id="cancel-end-session" class="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400">No</button>
+                  </div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('cancel-end-session').onclick = () => {
+              modal.remove();
+            };
+            document.getElementById('confirm-end-session').onclick = async () => {
+              await fetch('/api/end-session', { method: 'POST' });
+              modal.remove();
+              location.reload();
+            };
+          };
+        }
+      });
+    </script>
+  </body>
+</html>
