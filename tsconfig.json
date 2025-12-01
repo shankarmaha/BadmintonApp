@@ -1,0 +1,5 @@
+{
+  "extends": "astro/tsconfigs/base",
+  // Optionally, restrict the include pattern to only existing files/folders
+  "include": ["src/**/*.ts", "src/**/*.astro"]
+}
