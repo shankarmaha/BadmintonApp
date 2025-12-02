@@ -25,15 +25,27 @@ export default function PlayerStats() {
   const [gameHistory, setGameHistory] = useState<GameHistory[]>([]);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/src/data/players.json').then(res => res.json()),
-      fetch('/src/data/playerGames.json').then(res => res.json()),
-      fetch('/src/data/gameHistory.json').then(res => res.json()),
-    ]).then(([players, playerGames, gameHistory]) => {
-      setPlayers(players || []);
-      setPlayerGames(playerGames || []);
-      setGameHistory(gameHistory || []);
-    });
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const pls: Player[] = data.players ?? [];
+        const pg: PlayerGame[] = data.playerGames ?? [];
+        const gh: GameHistory[] = data.gameHistory ?? [];
+
+        setPlayers(pls || []);
+        setPlayerGames(pg || []);
+        setGameHistory(gh || []);
+      } catch (e) {
+        console.error('Failed to load data from /api/data.json:', e);
+        setPlayers([]);
+        setPlayerGames([]);
+        setGameHistory([]);
+      }
+    }
+
+    loadData();
   }, []);
 
   function getCourtTime(guid: string) {

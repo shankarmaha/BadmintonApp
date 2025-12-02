@@ -40,17 +40,31 @@ export default function BadmintonSession() {
   const [courts, setCourts] = useState<Court[]>([]);
   const [currentSessions, setCurrentSessions] = useState<CurrentSession[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
-
   useEffect(() => {
-    Promise.all([
-      fetch('/src/data/badmintonSession.json').then(res => res.json()),
-      fetch('/src/data/currentSession.json').then(res => res.json()),
-      fetch('/src/data/players.json').then(res => res.json()),
-    ]).then(([badmintonSession, currentSession, players]) => {
-      setCourts(badmintonSession.courts || []);
-      setCurrentSessions(currentSession || []);
-      setPlayers(players || []);
-    });
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const badmintonSession = data.badmintonSession ?? { courts: [] };
+        const currentSession = data.currentSession ?? [];
+        const playersList = data.players ?? [];
+
+        setCourts(badmintonSession.courts || []);
+        setCurrentSessions(currentSession || []);
+        setPlayers(playersList || []);
+        return;
+      } catch (err) {
+        console.error('Failed to load data from /api/data.json:', err);
+      }
+
+      // On error, clear data
+      setCourts([]);
+      setCurrentSessions([]);
+      setPlayers([]);
+    }
+
+    loadData();
   }, []);
 
   function getPlayersForCourt(sessionId: string) {

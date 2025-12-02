@@ -20,15 +20,27 @@ export default function GameStats() {
   const [badmintonSession, setBadmintonSession] = useState<{ courts: { courtNumber: number; sessionId: string }[] }>({ courts: [] });
 
   useEffect(() => {
-    Promise.all([
-      fetch('/src/data/gameHistory.json').then(res => res.json()),
-      fetch('/src/data/players.json').then(res => res.json()),
-      fetch('/src/data/badmintonSession.json').then(res => res.json()),
-    ]).then(([gameHistory, players, badmintonSession]) => {
-      setGameHistory(gameHistory || []);
-      setPlayers(players || []);
-      setBadmintonSession(badmintonSession || { courts: [] });
-    });
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const gh: GameHistory[] = data.gameHistory ?? [];
+        const pls: Player[] = data.players ?? [];
+        const bs: any = data.badmintonSession ?? { courts: [] };
+
+        setGameHistory(gh || []);
+        setPlayers(pls || []);
+        setBadmintonSession(bs || { courts: [] });
+      } catch (e) {
+        console.error('Failed to load data from /api/data.json:', e);
+        setGameHistory([]);
+        setPlayers([]);
+        setBadmintonSession({ courts: [] });
+      }
+    }
+
+    loadData();
   }, []);
 
   function getPlayerNames(guids: { guid: string }[]) {

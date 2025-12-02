@@ -28,10 +28,20 @@ export default function PlayerList({players}: PlayerListProps) {
   
   
   useEffect(() => {
-    fetch('/src/data/playerGames.json')
-      .then(res => res.json())
-      .then(setGames)
-      .catch(() => setGames([]));
+    async function loadPlayerGames() {
+      try {
+        const res = await fetch('/api/data.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const playerGames = data.playerGames ?? [];
+        setGames(playerGames);
+      } catch (err) {
+        console.error('Failed to load playerGames from /api/data.json:', err);
+        setGames([]);
+      }
+    }
+
+    loadPlayerGames();
   }, []);
 
   function getGamesPlayed(player: Player) {

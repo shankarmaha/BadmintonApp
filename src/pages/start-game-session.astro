@@ -14,86 +14,62 @@ function uuidv4() {
 }
 
 if (Astro.request.method === "POST") {
-  const VERCEL_BLOB_BASE_URL =
-    import.meta.env.VERCEL_BLOB_BASE_URL ??
-    import.meta.env.BLOB_BASE_URL ??
-    "https://5lmahcr7eatdowvx.public.blob.vercel-storage.com";
-  const VERCEL_BLOB_SESSION_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, "")}/badmintonSession.json.txt`;
-  const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
+  const REDIS_URL = 'redis://default:BhTmCNTYNczSkuH3PGwYcF0T11Ng4cah@redis-17112.c338.eu-west-2-1.ec2.cloud.redislabs.com:17112';
 
-  // Check if token is available
-  if (!BLOB_TOKEN) {
-    console.error(
-      "BLOB_READ_WRITE_TOKEN is not set. Make sure .env.local contains: BLOB_READ_WRITE_TOKEN=your_token"
-    );
-    error = "Server configuration error: BLOB_READ_WRITE_TOKEN not found. Check server logs.";
-  } else {
-    let sessionExists = false;
-    try {
-      // Use @vercel/blob SDK head to check for existence and get download URL
-      const { head } = await import('@vercel/blob');
-      // In dev, disable strict SSL verification to allow blob fetch
-      if (process.env.NODE_ENV === "development" || import.meta.env.DEV) {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  let sessionExists = false;
+  try {
+    const apiUrl = new URL('/api/data.json', Astro.url.origin).href;
+    const res = await fetch(apiUrl);
+    if (res.ok) {
+      const data = await res.json();
+      const badmintonSession = data.badmintonSession ?? null;
+      if (badmintonSession && Array.isArray(badmintonSession.courts) && badmintonSession.courts.length > 0) {
+        sessionExists = true;
       }
-      const meta = await head(VERCEL_BLOB_SESSION_URL, { token: BLOB_TOKEN });
-      const downloadUrl = meta.downloadUrl ?? meta.url ?? VERCEL_BLOB_SESSION_URL;
-      const res = await fetch(downloadUrl);
-      if (res.ok) {
-        const data = await res.text();
-        if (data && data.trim() !== "" && data.trim() !== "{}") {
-          sessionExists = true;
-        }
-      }
-    } catch (e) {
-      console.error("Error checking session from blob:", e);
-    }
-
-    if (sessionExists) {
-      // Redirect to home with error message as query param
-      return Astro.redirect(
-        "/?error=Game%20is%20in%20play.%20Use%20End%20Game%20Session%20to%20cancel%20the%20Games",
-      );
-    }
-
-    const formData = await Astro.request.formData();
-    const courtsValue = formData.get("courts");
-    courts = typeof courtsValue === "string" ? courtsValue : "";
-    const numCourts = Number(courts);
-    if (!numCourts || numCourts < 1 || numCourts > 4) {
-      error = "Number of courts must be between 1 and 4.";
     } else {
-      const session = {
-        courts: Array.from({ length: numCourts }, (_, i) => ({
-          courtNumber: i + 1,
-          sessionId: uuidv4(),
-        })),
-      };
+      console.warn('/api/data.json returned non-OK status when checking session:', res.status);
+    }
+  } catch (e) {
+    console.error('Error checking session via API:', e);
+  }
 
-      // Write to Vercel Blob
-      try {
-        const { put } = await import('@vercel/blob');
-        // Use pathname without leading slash for SDK
-        const url = new URL(VERCEL_BLOB_SESSION_URL);
-        const pathname = url.pathname.replace(/^\//, "");
-        // In dev, disable strict SSL verification to allow blob fetch
-        if (process.env.NODE_ENV === "development" || import.meta.env.DEV) {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-        }
-        const res = await put(pathname, JSON.stringify(session, null, 2), {
-          access: 'public',
-          token: BLOB_TOKEN,
-          contentType: 'application/json'
-        });
-        // put should either throw on error or return something; assume success if no throw
-        success = `Session started with ${numCourts} court(s).`;
-        courts = "";
-        return Astro.redirect("/");
-      } catch (e) {
-        console.error("Error writing session to blob:", e);
-        // If the error has a status code, provide a hint
-        error = e && e.message && e.message.includes('405') ? 'Failed to start session: upload rejected (405). Configure a writable upload endpoint.' : 'Failed to start session. Please try again.';
-      }
+  if (sessionExists) {
+    return new Response(null, {
+      status: 303,
+      headers: {
+        Location: "/?error=Game%20is%20in%20play.%20Use%20End%20Game%20Session%20to%20cancel%20the%20Games",
+      },
+    });
+  }
+
+  const formData = await Astro.request.formData();
+  const courtsValue = formData.get("courts");
+  courts = typeof courtsValue === "string" ? courtsValue : "";
+  const numCourts = Number(courts);
+  if (!numCourts || numCourts < 1 || numCourts > 4) {
+    error = "Number of courts must be between 1 and 4.";
+  } else {
+    const session = {
+      courts: Array.from({ length: numCourts }, (_, i) => ({
+        courtNumber: i + 1,
+        sessionId: uuidv4(),
+      })),
+    };
+
+    // Write to Redis
+    try {
+      const { createClient } = await import('redis');
+      const client = createClient({ url: REDIS_URL });
+      client.on('error', (err) => console.error('Redis error', err));
+      await client.connect();
+      await client.set('badmintonSession.json', JSON.stringify(session, null, 2));
+      await client.disconnect();
+      success = `Session started with ${numCourts} court(s).`;
+      courts = "";
+      return new Response(null, { status: 303, headers: { Location: '/' } });
+    } catch (e) {
+      console.error('Error writing session to redis:', e);
+      error = 'Failed to start session. Please try again.';
     }
   }
 }

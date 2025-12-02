@@ -1,6 +1,5 @@
 ---
 import { readFile } from 'fs/promises';
-import { head } from '@vercel/blob';
 export const prerender = false;
 import PlayerList from '../components/PlayerList';
 import BadmintonSession from '../components/BadmintonSession';
@@ -18,60 +17,28 @@ const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
 let _playerGamesCache: any[] | null = null;
 let _playerGamesCacheExpires = 0;
 
-// Fetch helper: try blob first, then fallback to local data/playerGames.json
+// Fetch helper: try API first, then fallback to local data/playerGames.json
 async function fetchPlayerGamesCached(ttlMs = 3000) {
   const now = Date.now();
   if (_playerGamesCache && _playerGamesCacheExpires > now) return _playerGamesCache;
 
-  // Try Vercel Blob only if token is set
-  if (VERCEL_BLOB_OBJECT_URL && BLOB_TOKEN) {
-    try {
-      console.log('Fetching playerGames from Vercel Blob...');
-      // Create an abort controller with a 5-second timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
-      const meta = await head(VERCEL_BLOB_OBJECT_URL, { 
-        token: BLOB_TOKEN,
-        abortSignal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      console.log('Vercel Blob metadata:', meta);
-      const downloadUrl = meta.downloadUrl ?? meta.url ?? VERCEL_BLOB_OBJECT_URL;
-      // In dev, disable strict SSL verification to allow blob fetch
-      if (process.env.NODE_ENV === 'development' || import.meta.env.DEV) {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-      }
-      const res = await fetch(downloadUrl);
-      if (res.ok) {
-        const text = await res.text();
-        const data = text ? JSON.parse(text) : [];
-        _playerGamesCache = data;
-        _playerGamesCacheExpires = now + ttlMs;
-        return data;
-      } else {
-        console.warn('Vercel Blob returned', res.status);
-      }
-    } catch (e) {
-      console.warn('Vercel Blob fetch failed, falling back to local file:', e);
+  // Try server API first (server-side) and fall back to local file
+  try {
+    const apiUrl = new URL('/api/data.json', Astro.url.origin).href;
+    const res = await fetch(apiUrl);
+    console.log('Fetched /api/data.json for playerGames, status:', res.status);
+    if (res.ok) {
+      const data = await res.json();
+      const playerGamesFromApi = data.playerGames ?? [];
+      _playerGamesCache = playerGamesFromApi;
+      _playerGamesCacheExpires = now + ttlMs;
+      return playerGamesFromApi;
     }
-  } else {
-    if (!BLOB_TOKEN) {
-      console.warn('BLOB_READ_WRITE_TOKEN not set, skipping Vercel Blob fetch');
-    }
+  } catch (e) {
+    console.warn('API fetch failed', e);
   }
 
-  // Fallback to local file
-  try {
-    const txt = await readFile(new URL('../data/playerGames.json', import.meta.url), 'utf-8');
-    const data = txt ? JSON.parse(txt) : [];
-    _playerGamesCache = data;
-    _playerGamesCacheExpires = now + ttlMs;
-    return data;
-  } catch (e) {
-    console.error('Failed to read local playerGames.json fallback:', e);
-    return [];
-  }
+  
 }
 
 // Fetch all data (playerGames stored in blob or local file)

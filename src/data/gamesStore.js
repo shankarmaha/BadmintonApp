@@ -1,27 +1,50 @@
 import { getPlayersQueue, deletePlayerFromQueue } from '../data/playerStore';
-import { promises as fs } from 'fs';
 
-const CURRENT_SESSION_PATH = './src/data/currentSession.json';
-const BADMINTON_SESSION_PATH = './src/data/badmintonSession.json';
+// Blob filenames
+const FILE_NAME_CURRENT_SESSION = 'currentSession.json';
+const FILE_NAME_BADMINTON_SESSION = 'badmintonSession.json';
+const FILE_NAME_PLAYER_GAMES = 'playerGames.json';
+const FILE_NAME_GAME_HISTORY = 'gameHistory.json';
+
+// Redis-based storage helpers
+let _redisClient = null;
+const REDIS_URL = process.env.REDIS_URL ?? import.meta.env.REDIS_URL ?? 'redis://default:BhTmCNTYNczSkuH3PGwYcF0T11Ng4cah@redis-17112.c338.eu-west-2-1.ec2.cloud.redislabs.com:17112';
+
+async function getRedisClient() {
+  if (_redisClient) return _redisClient;
+  const { createClient } = await import('redis');
+  const client = createClient({ url: REDIS_URL });
+  client.on('error', (err) => console.error('Redis Client Error', err));
+  await client.connect();
+  _redisClient = client;
+  return _redisClient;
+}
+
+async function readJsonFromRedis(key, defaultValue) {
+  try {
+    const client = await getRedisClient();
+    const txt = await client.get(key);
+    if (!txt) return defaultValue;
+    return JSON.parse(txt);
+  } catch (e) {
+    console.error('readJsonFromRedis error', e);
+    return defaultValue;
+  }
+}
+
+async function writeJsonToRedis(key, obj) {
+  const client = await getRedisClient();
+  await client.set(key, JSON.stringify(obj, null, 2));
+}
 
 let nextGameNumber = 1;
 
 export async function getCurrentSession() {
-  try {
-    const data = await fs.readFile(CURRENT_SESSION_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
+  return await readJsonFromRedis(FILE_NAME_CURRENT_SESSION, []);
 }
 
 export async function getBadmintonSession() {
-  try {
-    const data = await fs.readFile(BADMINTON_SESSION_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return { courts: [] };
-  }
+  return await readJsonFromRedis(FILE_NAME_BADMINTON_SESSION, { courts: [] });
 }
 
 export async function updateBadmintonSession(sessionId, courtNumber, gameInProgress) {
@@ -31,7 +54,7 @@ export async function updateBadmintonSession(sessionId, courtNumber, gameInProgr
   if (court) {
     court.gameInProgress = gameInProgress;
     court.sessionId = sessionId;
-    await fs.writeFile(BADMINTON_SESSION_PATH, JSON.stringify(badmintonSession, null, 2));
+    await writeJsonToRedis(FILE_NAME_BADMINTON_SESSION, badmintonSession);
   } else {
     throw new Error(`Court number ${courtNumber} not found.`);
   }
@@ -39,8 +62,7 @@ export async function updateBadmintonSession(sessionId, courtNumber, gameInProgr
 
 export async function addPlayersToSession(sessionId) {
   const players = await getPlayersQueue();
-  const PLAYER_GAMES_PATH = './src/data/playerGames.json';
-  const GAME_HISTORY_PATH = './src/data/gameHistory.json';
+  
 
   if (players.length === 0) {
     throw new Error("No players available to pick a game.");
@@ -50,21 +72,11 @@ export async function addPlayersToSession(sessionId) {
 
   // Get playerGames
   let playerGames = [];
-  try {
-    const data = await fs.readFile(PLAYER_GAMES_PATH, 'utf-8');
-    playerGames = JSON.parse(data);
-  } catch {
-    playerGames = [];
-  }
+  playerGames = await readJsonFromRedis(FILE_NAME_PLAYER_GAMES, []);
 
   // Get gameHistory
   let gameHistory = [];
-  try {
-    const data = await fs.readFile(GAME_HISTORY_PATH, 'utf-8');
-    gameHistory = JSON.parse(data);
-  } catch {
-    gameHistory = [];
-  }
+  gameHistory = await readJsonFromRedis(FILE_NAME_GAME_HISTORY, []);
 
   // Use static variable for gameNumber
   const gameNumber = nextGameNumber++;
@@ -139,7 +151,7 @@ export async function addPlayersToSession(sessionId) {
   const sesstionStartTime = new Date().toISOString();
   const currentSession = await getCurrentSession();
   currentSession.push({ sessionId: sessionId, startTime: sesstionStartTime, players: shuffledPlayers, gameNumber });
-  await fs.writeFile(CURRENT_SESSION_PATH, JSON.stringify(currentSession, null, 2));
+  await writeJsonToRedis(FILE_NAME_CURRENT_SESSION, currentSession);
 
   for (const player of shuffledPlayers) {
     await deletePlayerFromQueue(player.guid);
