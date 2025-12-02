@@ -11,7 +11,7 @@ import { getPlayers, getPlayersQueue } from '../data/playerStore.js';
 
 // Vercel Blob settings
 const VERCEL_BLOB_BASE_URL = 'https://5lmahcr7eatdowvx.public.blob.vercel-storage.com';
-const VERCEL_BLOB_OBJECT_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, '')}/playerGames.json.txt`;
+const VERCEL_BLOB_OBJECT_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, '')}/playerGames.json`;
 const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
 
 // Simple in-memory cache for the blob data
@@ -23,11 +23,20 @@ async function fetchPlayerGamesCached(ttlMs = 3000) {
   const now = Date.now();
   if (_playerGamesCache && _playerGamesCacheExpires > now) return _playerGamesCache;
 
-  // Try Vercel Blob
+  // Try Vercel Blob only if token is set
   if (VERCEL_BLOB_OBJECT_URL && BLOB_TOKEN) {
     try {
-      // Use @vercel/blob SDK to get a download URL for the object
-      const meta = await head(VERCEL_BLOB_OBJECT_URL, { token: BLOB_TOKEN });
+      console.log('Fetching playerGames from Vercel Blob...');
+      // Create an abort controller with a 5-second timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const meta = await head(VERCEL_BLOB_OBJECT_URL, { 
+        token: BLOB_TOKEN,
+        abortSignal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      console.log('Vercel Blob metadata:', meta);
       const downloadUrl = meta.downloadUrl ?? meta.url ?? VERCEL_BLOB_OBJECT_URL;
       // In dev, disable strict SSL verification to allow blob fetch
       if (process.env.NODE_ENV === 'development' || import.meta.env.DEV) {
@@ -46,6 +55,22 @@ async function fetchPlayerGamesCached(ttlMs = 3000) {
     } catch (e) {
       console.warn('Vercel Blob fetch failed, falling back to local file:', e);
     }
+  } else {
+    if (!BLOB_TOKEN) {
+      console.warn('BLOB_READ_WRITE_TOKEN not set, skipping Vercel Blob fetch');
+    }
+  }
+
+  // Fallback to local file
+  try {
+    const txt = await readFile(new URL('../data/playerGames.json', import.meta.url), 'utf-8');
+    const data = txt ? JSON.parse(txt) : [];
+    _playerGamesCache = data;
+    _playerGamesCacheExpires = now + ttlMs;
+    return data;
+  } catch (e) {
+    console.error('Failed to read local playerGames.json fallback:', e);
+    return [];
   }
 }
 
