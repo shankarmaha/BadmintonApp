@@ -1,49 +1,104 @@
 ---
 export const prerender = false;
-let error = '';
-let success = '';
-let courts = '';
+let error = "";
+let success = "";
+let courts = "";
 
 // Simple GUID generator
 function uuidv4() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0,
+      v = c == "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
 }
 
-if (Astro.request.method === 'POST') {
-  const fs = await import('fs/promises');
-  let sessionExists = false;
-  try {
-    const data = await fs.readFile('src/data/badmintonSession.json', 'utf-8');
-    if (data && data.trim() !== '' && data.trim() !== '{}') {
-      sessionExists = true;
-    }
-  } catch (e) {
-    // File does not exist, so session does not exist
-  }
-  if (sessionExists) {
-    // Redirect to home with error message as query param
-    return Astro.redirect('/?error=Game%20is%20in%20play.%20Use%20End%20Game%20Session%20to%20cancel%20the%20Games');
-  }
-  const formData = await Astro.request.formData();
-  const courtsValue = formData.get('courts');
-  courts = typeof courtsValue === 'string' ? courtsValue : '';
-  const numCourts = Number(courts);
-  if (!numCourts || numCourts < 1 || numCourts > 4) {
-    error = 'Number of courts must be between 1 and 4.';
+if (Astro.request.method === "POST") {
+  const VERCEL_BLOB_BASE_URL =
+    import.meta.env.VERCEL_BLOB_BASE_URL ??
+    import.meta.env.BLOB_BASE_URL ??
+    "https://5lmahcr7eatdowvx.public.blob.vercel-storage.com";
+  const VERCEL_BLOB_SESSION_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, "")}/badmintonSession.json.txt`;
+  const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
+
+  // Check if token is available
+  if (!BLOB_TOKEN) {
+    console.error(
+      "BLOB_READ_WRITE_TOKEN is not set. Make sure .env.local contains: BLOB_READ_WRITE_TOKEN=your_token"
+    );
+    error = "Server configuration error: BLOB_READ_WRITE_TOKEN not found. Check server logs.";
   } else {
-    const session = {
-      courts: Array.from({ length: numCourts }, (_, i) => ({ courtNumber: i + 1, sessionId: uuidv4() }))
-    };
-    await fs.writeFile('src/data/badmintonSession.json', JSON.stringify(session, null, 2));
-    success = `Session started with ${numCourts} court(s).`;
-    courts = '';
-    return Astro.redirect('/');
+    let sessionExists = false;
+    try {
+      // Use @vercel/blob SDK head to check for existence and get download URL
+      const { head } = await import('@vercel/blob');
+      // In dev, disable strict SSL verification to allow blob fetch
+      if (process.env.NODE_ENV === "development" || import.meta.env.DEV) {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      }
+      const meta = await head(VERCEL_BLOB_SESSION_URL, { token: BLOB_TOKEN });
+      const downloadUrl = meta.downloadUrl ?? meta.url ?? VERCEL_BLOB_SESSION_URL;
+      const res = await fetch(downloadUrl);
+      if (res.ok) {
+        const data = await res.text();
+        if (data && data.trim() !== "" && data.trim() !== "{}") {
+          sessionExists = true;
+        }
+      }
+    } catch (e) {
+      console.error("Error checking session from blob:", e);
+    }
+
+    if (sessionExists) {
+      // Redirect to home with error message as query param
+      return Astro.redirect(
+        "/?error=Game%20is%20in%20play.%20Use%20End%20Game%20Session%20to%20cancel%20the%20Games",
+      );
+    }
+
+    const formData = await Astro.request.formData();
+    const courtsValue = formData.get("courts");
+    courts = typeof courtsValue === "string" ? courtsValue : "";
+    const numCourts = Number(courts);
+    if (!numCourts || numCourts < 1 || numCourts > 4) {
+      error = "Number of courts must be between 1 and 4.";
+    } else {
+      const session = {
+        courts: Array.from({ length: numCourts }, (_, i) => ({
+          courtNumber: i + 1,
+          sessionId: uuidv4(),
+        })),
+      };
+
+      // Write to Vercel Blob
+      try {
+        const { put } = await import('@vercel/blob');
+        // Use pathname without leading slash for SDK
+        const url = new URL(VERCEL_BLOB_SESSION_URL);
+        const pathname = url.pathname.replace(/^\//, "");
+        // In dev, disable strict SSL verification to allow blob fetch
+        if (process.env.NODE_ENV === "development" || import.meta.env.DEV) {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        }
+        const res = await put(pathname, JSON.stringify(session, null, 2), {
+          access: 'public',
+          token: BLOB_TOKEN,
+          contentType: 'application/json'
+        });
+        // put should either throw on error or return something; assume success if no throw
+        success = `Session started with ${numCourts} court(s).`;
+        courts = "";
+        return Astro.redirect("/");
+      } catch (e) {
+        console.error("Error writing session to blob:", e);
+        // If the error has a status code, provide a hint
+        error = e && e.message && e.message.includes('405') ? 'Failed to start session: upload rejected (405). Configure a writable upload endpoint.' : 'Failed to start session. Please try again.';
+      }
+    }
   }
 }
 ---
+
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -55,12 +110,23 @@ if (Astro.request.method === 'POST') {
       <h2 class="text-xl font-bold mb-4">Start Game Session</h2>
       <form method="POST">
         <label class="block mb-2 font-semibold">No of Courts</label>
-        <input name="courts" type="number" min="1" max="4" required class="border rounded px-3 py-2 w-full mb-4" value={courts} />
+        <input
+          name="courts"
+          type="number"
+          min="1"
+          max="4"
+          required
+          class="border rounded px-3 py-2 w-full mb-4"
+          value={courts}
+        />
         {error && <div class="text-red-500 mb-2">{error}</div>}
         {success && <div class="text-green-600 mb-2">{success}</div>}
-        <button type="submit" class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition">Start Session</button>
+        <button
+          type="submit"
+          class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition"
+          >Start Session</button
+        >
       </form>
     </main>
   </body>
 </html>
-

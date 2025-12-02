@@ -1,17 +1,72 @@
 ---
+import { readFile } from 'fs/promises';
+import { head } from '@vercel/blob';
 export const prerender = false;
 import PlayerList from '../components/PlayerList';
 import BadmintonSession from '../components/BadmintonSession';
-import fs from 'fs/promises';
+
 import { getPlayers, getPlayersQueue } from '../data/playerStore.js';
 
 
-// Fetch all data
-const [playersQueue, allPlayers, playerGames] = await Promise.all([
-  getPlayersQueue(),
-  getPlayers(),
-  fs.readFile('src/data/playerGames.json', 'utf-8').then(JSON.parse).catch(() => [])
-]);
+
+// Vercel Blob settings
+const VERCEL_BLOB_BASE_URL = 'https://5lmahcr7eatdowvx.public.blob.vercel-storage.com';
+const VERCEL_BLOB_OBJECT_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, '')}/playerGames.json.txt`;
+const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
+
+// Simple in-memory cache for the blob data
+let _playerGamesCache: any[] | null = null;
+let _playerGamesCacheExpires = 0;
+
+// Fetch helper: try blob first, then fallback to local data/playerGames.json
+async function fetchPlayerGamesCached(ttlMs = 3000) {
+  const now = Date.now();
+  if (_playerGamesCache && _playerGamesCacheExpires > now) return _playerGamesCache;
+
+  // Try Vercel Blob
+  if (VERCEL_BLOB_OBJECT_URL && BLOB_TOKEN) {
+    try {
+      // Use @vercel/blob SDK to get a download URL for the object
+      const meta = await head(VERCEL_BLOB_OBJECT_URL, { token: BLOB_TOKEN });
+      const downloadUrl = meta.downloadUrl ?? meta.url ?? VERCEL_BLOB_OBJECT_URL;
+      // In dev, disable strict SSL verification to allow blob fetch
+      if (process.env.NODE_ENV === 'development' || import.meta.env.DEV) {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      }
+      const res = await fetch(downloadUrl);
+      if (res.ok) {
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : [];
+        _playerGamesCache = data;
+        _playerGamesCacheExpires = now + ttlMs;
+        return data;
+      } else {
+        console.warn('Vercel Blob returned', res.status);
+      }
+    } catch (e) {
+      console.warn('Vercel Blob fetch failed, falling back to local file:', e);
+    }
+  }
+}
+
+// Fetch all data (playerGames stored in blob or local file)
+let playerGames: any[] = [];
+let playersQueue: any[] = [];
+let allPlayers: any[] = [];
+
+try {
+  [playersQueue, allPlayers] = await Promise.all([
+    getPlayersQueue(),
+    getPlayers()
+  ]);
+
+  playerGames = await fetchPlayerGamesCached();
+} catch (err) {
+  console.error('Error fetching data:', err);
+  playersQueue = [];
+  allPlayers = [];
+  playerGames = [];
+}
 
 // Build the list to display: for each guid in playersQueue, get name, arrivedDateTime from players, and noOfGamesPlayed from playerGames
 const players = playersQueue.map(q => {

@@ -16,12 +16,15 @@
     "@astrojs/react": "^4.3.0",
     "@astrojs/tailwind": "^6.0.2",
     "@astrojs/vercel": "^9.0.2",
+    "@vercel/blob": "^0.27.1",
     "astro": "^5.12.6",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "redis": "^5.10.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
+    "dotenv": "^17.2.3",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17"
   }
