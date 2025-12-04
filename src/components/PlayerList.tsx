@@ -7,6 +7,7 @@ import DeletePlayerForm from './DeletePlayerForm';
 interface Player {
   guid: string;
   name: string;
+  isPaused?: boolean;
   arrivedDateTime?: string;
 }
 
@@ -24,8 +25,11 @@ interface PlayerListProps {
 
 
 export default function PlayerList({players}: PlayerListProps) {
+  const [localPlayers, setLocalPlayers] = useState<Player[]>(players || []);
+  useEffect(() => {
+    setLocalPlayers(players || []);
+  }, [players]);
   const [games, setGames] = useState<PlayerGame[]>([]);
-  
   
   useEffect(() => {
     async function loadPlayerGames() {
@@ -34,7 +38,10 @@ export default function PlayerList({players}: PlayerListProps) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const playerGames = data.playerGames ?? [];
+        const playersList = data.players ?? [];
         setGames(playerGames);
+        // Update localPlayers with fresh data from API
+        setLocalPlayers(playersList);
       } catch (err) {
         console.error('Failed to load playerGames from /api/data.json:', err);
         setGames([]);
@@ -63,6 +70,7 @@ export default function PlayerList({players}: PlayerListProps) {
               <th className="px-4 py-2 text-left font-semibold text-gray-700">Name</th>
               <th className="px-4 py-2 text-left font-semibold text-gray-700">Arrived Time</th>
               <th className="px-4 py-2 text-left font-semibold text-gray-700">Games</th>
+              <th className='px-4 py-2 text-left font-semibold text-gray-700'>Paused</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -72,11 +80,58 @@ export default function PlayerList({players}: PlayerListProps) {
                 <td colSpan={4} className="text-center text-gray-500 py-4">No players yet.</td>
               </tr>
             ) : (
-              players.map((player) => (
+              localPlayers.map((player) => (
                 <tr key={player.guid} className="border-t border-gray-100 hover:bg-orange-50 transition">
                   <td className="px-4 py-2 font-medium text-gray-900">{player.name}</td>
                   <td className="px-4 py-2 text-gray-600 text-sm">{player.arrivedDateTime}</td>
                   <td className="px-4 py-2 text-center">{getGamesPlayed(player)}</td>
+                  <td className="px-4 py-2 text-center">
+                    {player.isPaused ? (
+                      <button
+                        className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+                        onClick={async () => {
+                          // optimistic update
+                          const updated = localPlayers.map(p => p.guid === player.guid ? { ...p, isPaused: false } : p);
+                          setLocalPlayers(updated);
+                          try {
+                            const res = await fetch('/api/data.json', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ key: 'players.json', value: updated })
+                            });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                          } catch (err) {
+                            console.error('Failed to update isPaused via API:', err);
+                            // revert
+                            setLocalPlayers(players || []);
+                          }
+                        }}
+                      >
+                        Play
+                      </button>
+                    ) : (
+                      <button
+                        className="px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                        onClick={async () => {
+                          const updated = localPlayers.map(p => p.guid === player.guid ? { ...p, isPaused: true } : p);
+                          setLocalPlayers(updated);
+                          try {
+                            const res = await fetch('/api/data.json', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ key: 'players.json', value: updated })
+                            });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                          } catch (err) {
+                            console.error('Failed to update isPaused via API:', err);
+                            setLocalPlayers(players || []);
+                          }
+                        }}
+                      >
+                        Pause
+                      </button>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-right"><DeletePlayerForm guid={player.guid} /></td>
                 </tr>
               ))

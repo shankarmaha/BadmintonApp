@@ -8,10 +8,7 @@ import { getPlayers, getPlayersQueue } from '../data/playerStore.js';
 
 
 
-// Vercel Blob settings
-const VERCEL_BLOB_BASE_URL = 'https://5lmahcr7eatdowvx.public.blob.vercel-storage.com';
-const VERCEL_BLOB_OBJECT_URL = `${VERCEL_BLOB_BASE_URL.replace(/\/$/, '')}/playerGames.json`;
-const BLOB_TOKEN = import.meta.env.BLOB_READ_WRITE_TOKEN;
+
 
 // Simple in-memory cache for the blob data
 let _playerGamesCache: any[] | null = null;
@@ -22,7 +19,6 @@ async function fetchPlayerGamesCached(ttlMs = 3000) {
   const now = Date.now();
   if (_playerGamesCache && _playerGamesCacheExpires > now) return _playerGamesCache;
 
-  // Try server API first (server-side) and fall back to local file
   try {
     const apiUrl = new URL('/api/data.json', Astro.url.origin).href;
     const res = await fetch(apiUrl);

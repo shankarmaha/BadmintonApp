@@ -82,8 +82,9 @@ export async function addPlayer(name) {
     );
   }
   const arrivedDateTime = new Date().toLocaleTimeString();
-  players.push({ guid, name, arrivedDateTime });
-  console.log('Adding player to queue:', guid, name, arrivedDateTime);
+  let isPaused = false;
+  players.push({ guid, name, arrivedDateTime, isPaused });
+  console.log('Adding player to queue:', guid, name, arrivedDateTime, false);
   playersQueue.push({ guid}); 
   await writeJsonToRedis(FILE_NAME_PLAYERS, players);
   await writeJsonToRedis(FILE_NAME_PLAYERS_QUEUE, playersQueue);

@@ -61,13 +61,21 @@ export async function updateBadmintonSession(sessionId, courtNumber, gameInProgr
 }
 
 export async function addPlayersToSession(sessionId) {
-  const players = await getPlayersQueue();
+  const playersQueue = await getPlayersQueue();
   
+  // Get full player data to check isPaused status
+  const allPlayers = await readJsonFromRedis('players.json', []);
+  
+  // Filter out paused players from the queue
+  const players = playersQueue.filter(queuePlayer => {
+    const fullPlayer = allPlayers.find(p => p.guid === queuePlayer.guid);
+    return !fullPlayer?.isPaused;
+  });
 
   if (players.length === 0) {
-    throw new Error("No players available to pick a game.");
+    throw new Error("No available players to pick a game.");
   } else if (players.length < 4) {
-    throw new Error("Not enough players to pick a game. At least 4 players are required.");
+    throw new Error("Not enough available players to pick a game. At least 4 players are required.");
   }
 
   // Get playerGames
@@ -99,18 +107,18 @@ export async function addPlayersToSession(sessionId) {
     });
   }
 
-  // Helper to check if a player has played three consecutive games using gameNumber
-  function hasPlayedThreeConsecutive(guid) {
+  // Helper to check if a player has played two consecutive games using gameNumber
+  function hasPlayedTwoConsecutive(guid) {
     // Get all gameNumbers where player participated, sorted
     const numbers = gameHistory
       .filter(game => game.players.some(p => p.guid === guid) && typeof game.gameNumber === 'number')
       .map(game => game.gameNumber)
       .sort((a, b) => a - b);
-    // Check for three consecutive gameNumbers ending with the last game
-    if (numbers.length < 3) return false;
-    for (let i = 0; i < numbers.length - 2; i++) {
-      if (numbers[i + 1] === numbers[i] + 1 && numbers[i + 2] === numbers[i] + 2) {
-        if (numbers[i + 2] === (gameNumber - 1)) {
+    // Check for two consecutive gameNumbers ending with the last game
+    if (numbers.length < 2) return false;
+    for (let i = 0; i < numbers.length - 1; i++) {
+      if (numbers[i + 1] === numbers[i] + 1) {
+        if (numbers[i + 1] === (gameNumber - 1)) {
           return true;
         }
       }
@@ -118,8 +126,8 @@ export async function addPlayersToSession(sessionId) {
     return false;
   }
 
-  // Filter out players who have played three consecutive games
-  const eligiblePlayers = sortedPlayers.filter(p => !hasPlayedThreeConsecutive(p.guid));
+  // Filter out players who have played two consecutive games
+  const eligiblePlayers = sortedPlayers.filter(p => !hasPlayedTwoConsecutive(p.guid));
 
   let shuffledPlayers = null;
   // Try to find a group of 4 eligible players who have not played together

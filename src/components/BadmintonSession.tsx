@@ -18,9 +18,14 @@ interface CurrentSession {
 interface Player {
   guid: string;
   name: string;
+  isPaused?: boolean;
 }
 
 export default function BadmintonSession() {
+  // Modal state for finishing session
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalSessionId, setModalSessionId] = useState<string | null>(null);
+  const [pausedPlayers, setPausedPlayers] = useState<Set<string>>(new Set());
   // Helper to format elapsed time as HH:MM:SS
   function formatElapsedTime(seconds: number) {
     const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
@@ -109,9 +114,10 @@ export default function BadmintonSession() {
                             {elapsed >= 0 ? formatElapsedTime(elapsed) : '00:00:00'}
                             <button
                               className="ml-4 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition"
-                              onClick={async () => {
-                                await fetch(`/api/finish-session?sessionId=${court.sessionId}`, { method: 'POST' });
-                                window.location.reload();
+                              onClick={() => {
+                                setModalSessionId(court.sessionId);
+                                setModalOpen(true);
+                                setPausedPlayers(new Set());
                               }}
                             >Finished</button>
                           </span>
@@ -125,6 +131,91 @@ export default function BadmintonSession() {
           ))
         )}
       </div>
+
+      {/* Modal for pausing players */}
+      {modalOpen && modalSessionId && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4">Select players to pause</h3>
+            <div className="max-h-64 overflow-y-auto mb-4 space-y-2">
+              {(() => {
+                // Get players for this specific session
+                const session = currentSessions.find(s => s.sessionId === modalSessionId);
+                const sessionPlayerGuids = session ? session.players.map(sp => sp.guid) : [];
+                const sessionPlayers = players.filter(p => sessionPlayerGuids.includes(p.guid));
+                
+                return sessionPlayers.map(player => (
+                  <label key={player.guid} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={pausedPlayers.has(player.guid)}
+                      onChange={(e) => {
+                        const newSet = new Set(pausedPlayers);
+                        if (e.target.checked) {
+                          newSet.add(player.guid);
+                        } else {
+                          newSet.delete(player.guid);
+                        }
+                        setPausedPlayers(newSet);
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-gray-700">{player.name}</span>
+                  </label>
+                ));
+              })()}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400"
+                onClick={() => {
+                  setModalOpen(false);
+                  setModalSessionId(null);
+                  setPausedPlayers(new Set());
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                onClick={async () => {
+                  // Get session players
+                  const session = currentSessions.find(s => s.sessionId === modalSessionId);
+                  const sessionPlayerGuids = session ? session.players.map(sp => sp.guid) : [];
+                  
+                  // Update only the players in this session with isPaused status
+                  const updatedPlayers = players.map(p => {
+                    if (sessionPlayerGuids.includes(p.guid)) {
+                      return {
+                        ...p,
+                        isPaused: pausedPlayers.has(p.guid)
+                      };
+                    }
+                    return p;
+                  });
+                  
+                  try {
+                    // Update players.json via API
+                    await fetch('/api/data.json', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ key: 'players.json', value: updatedPlayers })
+                    });
+                    
+                    // Finish the session
+                    await fetch(`/api/finish-session?sessionId=${modalSessionId}`, { method: 'POST' });
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Error finishing session:', err);
+                  }
+                }}
+              >
+                Finish & Pause Selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
