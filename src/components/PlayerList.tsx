@@ -27,7 +27,28 @@ interface PlayerListProps {
 export default function PlayerList({players}: PlayerListProps) {
   const [localPlayers, setLocalPlayers] = useState<Player[]>(players || []);
   useEffect(() => {
+    // Start with the queued players passed from the parent
     setLocalPlayers(players || []);
+
+    // Fetch current player records to get up-to-date `isPaused` values
+    // and merge those statuses into the queued players for button state.
+    async function mergePausedStatuses() {
+      try {
+        const res = await fetch('/api/data.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const allPlayers = data.players ?? [];
+        const merged = (players || []).map(p => {
+          const found = allPlayers.find((ap: any) => ap.guid === p.guid);
+          return { ...p, isPaused: found && typeof found.isPaused !== 'undefined' ? found.isPaused : p.isPaused };
+        });
+        setLocalPlayers(merged);
+      } catch (err) {
+        console.error('Failed to merge isPaused statuses from /api/data.json:', err);
+      }
+    }
+
+    mergePausedStatuses();
   }, [players]);
   const [games, setGames] = useState<PlayerGame[]>([]);
   
@@ -38,10 +59,7 @@ export default function PlayerList({players}: PlayerListProps) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const playerGames = data.playerGames ?? [];
-        const playersList = data.players ?? [];
         setGames(playerGames);
-        // Update localPlayers with fresh data from API
-        setLocalPlayers(playersList);
       } catch (err) {
         console.error('Failed to load playerGames from /api/data.json:', err);
         setGames([]);
@@ -90,19 +108,16 @@ export default function PlayerList({players}: PlayerListProps) {
                       <button
                         className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
                         onClick={async () => {
-                          // optimistic update
                           const updated = localPlayers.map(p => p.guid === player.guid ? { ...p, isPaused: false } : p);
                           setLocalPlayers(updated);
                           try {
-                            const res = await fetch('/api/data.json', {
+                            await fetch('/api/data.json', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ key: 'players.json', value: updated })
+                              body: JSON.stringify({ key: 'players.json', patch: { guid: player.guid, field: 'isPaused', value: false } })
                             });
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
                           } catch (err) {
-                            console.error('Failed to update isPaused via API:', err);
-                            // revert
+                            console.error('Failed to update isPaused:', err);
                             setLocalPlayers(players || []);
                           }
                         }}
@@ -116,14 +131,13 @@ export default function PlayerList({players}: PlayerListProps) {
                           const updated = localPlayers.map(p => p.guid === player.guid ? { ...p, isPaused: true } : p);
                           setLocalPlayers(updated);
                           try {
-                            const res = await fetch('/api/data.json', {
+                            await fetch('/api/data.json', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ key: 'players.json', value: updated })
+                              body: JSON.stringify({ key: 'players.json', patch: { guid: player.guid, field: 'isPaused', value: true } })
                             });
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
                           } catch (err) {
-                            console.error('Failed to update isPaused via API:', err);
+                            console.error('Failed to update isPaused:', err);
                             setLocalPlayers(players || []);
                           }
                         }}

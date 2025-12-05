@@ -102,6 +102,25 @@ export const POST: APIRoute = async ({ request }) => {
     const client = createClient({ url: REDIS_URL });
     client.on('error', (err) => console.error('Redis Client Error', err));
     await client.connect();
+
+    // Support a lightweight patch operation for players.json
+    if (body.patch && body.key === 'players.json') {
+      try {
+        const txt = await client.get('players.json');
+        const players = txt ? JSON.parse(toStringOrNull(txt) as string) : [];
+        const { guid, field, value } = body.patch;
+        const updated = (players || []).map((p: any) => p.guid === guid ? { ...p, [field]: value } : p);
+        await client.set('players.json', JSON.stringify(updated));
+        await client.disconnect();
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      } catch (e) {
+        console.error('Failed to apply patch to players.json', e);
+        await client.disconnect();
+        return new Response(JSON.stringify({ error: 'Failed to apply patch' }), { status: 500 });
+      }
+    }
+
+    // Default: overwrite the key with provided value
     await client.set(body.key, JSON.stringify(body.value));
     await client.disconnect();
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
